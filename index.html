@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>小鹏语音助手</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden}
@@ -51,25 +53,26 @@ body{
 .hint.active{color:#10b981}
 
 .api-section{
-  width:100%;max-width:500px;padding:16px 20px;display:flex;gap:8px;
+  width:100%;max-width:500px;padding:16px 20px;display:flex;flex-direction:column;gap:8px;
 }
 .api-section input{
   flex:1;padding:10px 14px;border-radius:20px;border:none;
-  background:#1e1b4b;color:#fff;font-size:14px;outline:none;
+  background:#1e1b4b;color:#fff;font-size:14px;outline:none;width:100%;
 }
 .api-section input::placeholder{color:#666}
+.api-section .btn-row{display:flex;gap:8px}
 .api-section button{
-  padding:10px 20px;border-radius:20px;border:none;
+  flex:1;padding:10px 20px;border-radius:20px;border:none;
   background:#4f46e5;color:#fff;font-size:14px;cursor:pointer;white-space:nowrap;
 }
 
 .top-bar{
   width:100%;max-width:500px;padding:12px 16px;
-  display:flex;justify-content:flex-end;align-items:center;gap:8px;
+  display:flex;justify-content:flex-end;align-items:center;gap:6px;
 }
 .top-bar button{
-  background:none;border:1px solid #444;color:#999;padding:6px 14px;
-  border-radius:14px;font-size:12px;cursor:pointer;
+  background:none;border:1px solid #444;color:#999;padding:6px 12px;
+  border-radius:14px;font-size:11px;cursor:pointer;
 }
 .status-dot{
   width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:4px;
@@ -83,18 +86,21 @@ body{
 <div class="top-bar">
   <span class="status-dot" id="statusDot"></span>
   <span style="font-size:12px;color:#999;margin-right:auto" id="statusText">未连接</span>
-  <button id="clearBtn">清空对话</button>
+  <button id="clearBtn">新对话</button>
   <button id="testVoice">测试声音</button>
 </div>
 
 <div class="api-section" id="apiSection">
-  <input type="password" id="apiKey" placeholder="输入 DeepSeek API Key (sk-...)">
-  <button id="saveKey">保存</button>
+  <input type="password" id="apiKey" placeholder="DeepSeek API Key (sk-...)">
+  <input type="password" id="sfKey" placeholder="硅基流动 Key（可选，声音更好听）">
+  <div class="btn-row">
+    <button id="saveKey">保存</button>
+  </div>
 </div>
 
 <div class="conversation" id="conversation">
   <div class="msg assistant">
-    老大好！我是小鹏。<br>点下方按钮开始对话，说完后我会自动回复。
+    老大好！我是小鹏。<br>点下方按钮开始对话，我会记住上下文，像打电话一样自然聊天。
   </div>
 </div>
 
@@ -106,56 +112,62 @@ body{
 <script>
 const STATE = {
   apiKey: localStorage.getItem('xp_api_key') || '',
-  tts: localStorage.getItem('xp_tts') || 'browser',
+  sfKey: localStorage.getItem('xp_sf_key') || '',
   active: false,
   listening: false,
   speaking: false,
   recognition: null,
   silenceTimer: null,
+  // 对话历史 - 保留最近30条
+  history: [],
 };
+
+const SYSTEM_PROMPT = '你是小鹏，老大的专属全能AI助理。认真细致、靠谱踏实。用简体中文回复，称呼用户为"老大"。回复简短精炼适合语音播报，控制在2-4句话，不要列表编号Markdown，像打电话聊天一样自然。记住之前的对话内容，保持连贯。';
 
 const conv = document.getElementById('conversation');
 const holdBtn = document.getElementById('holdBtn');
 const hint = document.getElementById('hint');
 const apiKeyInput = document.getElementById('apiKey');
-const ttsSelect = document.getElementById('ttsSelect');
+const sfKeyInput = document.getElementById('sfKey');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 
-// 初始化
 if (STATE.apiKey) {
-  document.getElementById('apiSection').style.display = 'none';
   apiKeyInput.value = STATE.apiKey;
+}
+if (STATE.sfKey) {
+  sfKeyInput.value = STATE.sfKey;
+}
+if (STATE.apiKey && STATE.sfKey) {
+  document.getElementById('apiSection').style.display = 'none';
+} else if (STATE.apiKey) {
+  document.getElementById('apiSection').style.display = 'none';
 }
 
 document.getElementById('saveKey').addEventListener('click', () => {
-  const key = apiKeyInput.value.trim();
-  if (!key.startsWith('sk-')) return alert('API Key 格式不对，应该以 sk- 开头');
-  STATE.apiKey = key;
-  localStorage.setItem('xp_api_key', key);
+  const k = apiKeyInput.value.trim();
+  const sf = sfKeyInput.value.trim();
+  if (!k.startsWith('sk-')) return alert('DeepSeek Key 格式不对，应该以 sk- 开头');
+  STATE.apiKey = k;
+  STATE.sfKey = sf;
+  localStorage.setItem('xp_api_key', k);
+  localStorage.setItem('xp_sf_key', sf);
   document.getElementById('apiSection').style.display = 'none';
-  addMsg('assistant', 'Key 已保存，老大点按钮开始对话吧 🎤');
+  addMsg('assistant', 'Key 已保存。老大，点按钮开始对话吧！');
 });
 
 document.getElementById('clearBtn').addEventListener('click', () => {
+  STATE.history = [];
   conv.innerHTML = '';
-  addMsg('assistant', '对话已清空，老大请说～');
+  addMsg('assistant', '新对话已开始，老大请说～');
 });
 
 document.getElementById('testVoice').addEventListener('click', () => {
-  const testText = '老大你好，我是小鹏，声音测试成功。';
-  addMsg('assistant', testText);
-  // 用 setTimeout 确保 iOS 能播放
-  setTimeout(() => {
-    const u = new SpeechSynthesisUtterance(testText);
-    u.lang = 'zh-CN';
-    u.rate = 1.0;
-    u.volume = 1;
-    speechSynthesis.speak(u);
-  }, 100);
+  const t = '老大你好，我是小鹏。声音测试成功，现在开始聊天吧。';
+  addMsg('assistant', t);
+  doSpeak(t);
 });
 
-// 语音识别
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SpeechRecognition) {
   holdBtn.disabled = true;
@@ -164,69 +176,48 @@ if (!SpeechRecognition) {
 
 function startListening() {
   if (STATE.speaking) return;
-
   STATE.recognition = new SpeechRecognition();
   STATE.recognition.lang = 'zh-CN';
   STATE.recognition.interimResults = true;
   STATE.recognition.continuous = true;
   STATE.listening = true;
-
   updateUI('listening');
-
   let finalText = '';
 
   STATE.recognition.onresult = (e) => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        finalText += e.results[i][0].transcript;
-      } else {
-        interim += e.results[i][0].transcript;
-      }
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
     }
     hint.textContent = finalText || interim || '🎤 正在听...';
-
     clearTimeout(STATE.silenceTimer);
     STATE.silenceTimer = setTimeout(() => {
-      if (STATE.listening && finalText.trim()) {
-        stopAndSend(finalText.trim());
-      }
+      if (STATE.listening && finalText.trim()) stopAndSend(finalText.trim());
     }, 1500);
   };
 
   STATE.recognition.onerror = (e) => {
     if (e.error === 'no-speech') {
-      if (STATE.active) {
-        // 对话模式：自动重新听
-        setTimeout(() => { if (STATE.active && !STATE.speaking) restartListen(); }, 500);
-      }
+      if (STATE.active) setTimeout(() => { if (STATE.active && !STATE.speaking) restartListen(); }, 500);
     } else if (e.error !== 'aborted') {
       hint.textContent = '⚠️ ' + e.error;
-      if (STATE.active) {
-        setTimeout(() => { if (STATE.active && !STATE.speaking) restartListen(); }, 1000);
-      }
+      if (STATE.active) setTimeout(() => { if (STATE.active && !STATE.speaking) restartListen(); }, 1000);
     }
   };
 
   STATE.recognition.onend = () => {
-    if (STATE.listening && finalText.trim()) {
-      stopAndSend(finalText.trim());
-    } else if (STATE.active && !STATE.speaking) {
-      restartListen();
-    }
+    if (STATE.listening && finalText.trim()) stopAndSend(finalText.trim());
+    else if (STATE.active && !STATE.speaking) restartListen();
   };
 
   STATE.recognition.start();
 }
 
 function restartListen() {
-  try {
-    if (STATE.recognition) STATE.recognition.abort();
-  } catch(e) {}
+  try { if (STATE.recognition) STATE.recognition.abort(); } catch(e) {}
   STATE.listening = false;
-  setTimeout(() => {
-    if (STATE.active && !STATE.speaking) startListening();
-  }, 300);
+  setTimeout(() => { if (STATE.active && !STATE.speaking) startListening(); }, 300);
 }
 
 function stopAndSend(text) {
@@ -236,7 +227,6 @@ function stopAndSend(text) {
   sendToAI(text);
 }
 
-// 消息
 function addMsg(role, text) {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
@@ -246,29 +236,31 @@ function addMsg(role, text) {
   return div;
 }
 
-// AI
 async function sendToAI(text) {
   const msgDiv = addMsg('assistant', '...');
   updateUI('thinking');
+
+  // 维护对话历史
+  STATE.history.push({ role: 'user', content: text });
+  if (STATE.history.length > 30) STATE.history = STATE.history.slice(-30);
+
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...STATE.history
+  ];
 
   try {
     const resp = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + STATE.apiKey },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: '你是小鹏，老大的专属全能AI助理。认真细致、靠谱踏实。用简体中文回复，称呼用户为"老大"。回复简短精炼适合语音播报，控制在2-4句话，不要列表编号Markdown，像打电话聊天一样自然。' },
-          { role: 'user', content: text }
-        ],
-        max_tokens: 300, temperature: 0.7,
-      }),
+      body: JSON.stringify({ model: 'deepseek-chat', messages, max_tokens: 300, temperature: 0.7 }),
     });
-
     const data = await resp.json();
     const reply = data.choices?.[0]?.message?.content || '抱歉老大，脑子卡了一下...';
+    STATE.history.push({ role: 'assistant', content: reply });
+    if (STATE.history.length > 30) STATE.history = STATE.history.slice(-30);
     msgDiv.textContent = reply;
-    speak(reply, msgDiv);
+    doSpeak(reply, msgDiv);
   } catch (e) {
     msgDiv.textContent = '网络出问题了老大，检查一下 API Key 吧';
     updateUI('active');
@@ -276,43 +268,65 @@ async function sendToAI(text) {
   }
 }
 
-// TTS 语音输出
-function speak(text, msgDiv) {
+// 语音输出 - 优先用硅基流动TTS，其次浏览器TTS
+async function doSpeak(text, msgDiv) {
   STATE.speaking = true;
   updateUI('speaking');
   if (msgDiv) msgDiv.classList.add('speaking');
 
-  // 用 setTimeout 脱离异步上下文，兼容 iOS
+  // 有硅基流动Key就用好听的TTS
+  if (STATE.sfKey) {
+    try {
+      const ttsResp = await fetch('https://api.siliconflow.cn/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + STATE.sfKey
+        },
+        body: JSON.stringify({
+          model: 'FunAudioLLM/CosyVoice2-0.5B',
+          input: text,
+          voice: 'FunAudioLLM/CosyVoice2-0.5B:alex',
+          response_format: 'mp3',
+          speed: 1.1
+        }),
+      });
+      if (ttsResp.ok) {
+        const blob = await ttsResp.blob();
+        const audio = new Audio(URL.createObjectURL(blob));
+        audio.onended = () => onSpeakEnd(msgDiv);
+        audio.onerror = () => onSpeakEnd(msgDiv);
+        audio.play();
+        return;
+      }
+    } catch(e) {
+      // 硅基失败，降级到浏览器TTS
+    }
+  }
+
+  // 浏览器TTS降级
   setTimeout(() => {
     speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'zh-CN';
-    utter.rate = 1.1;
-    utter.volume = 1;
-
-    utter.onend = () => {
-      STATE.speaking = false;
-      if (msgDiv) msgDiv.classList.remove('speaking');
-      if (STATE.active) {
-        setTimeout(() => startListening(), 500);
-      } else {
-        updateUI('idle');
-      }
-    };
-
-    utter.onerror = () => {
-      STATE.speaking = false;
-      if (msgDiv) msgDiv.classList.remove('speaking');
-      if (STATE.active) {
-        setTimeout(() => startListening(), 500);
-      }
-    };
-
-    speechSynthesis.speak(utter);
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN';
+    u.rate = 1.05;
+    u.volume = 1;
+    u.onend = () => onSpeakEnd(msgDiv);
+    u.onerror = () => onSpeakEnd(msgDiv);
+    speechSynthesis.speak(u);
   }, 50);
 }
 
-// UI 状态更新
+function onSpeakEnd(msgDiv) {
+  STATE.speaking = false;
+  if (msgDiv) msgDiv.classList.remove('speaking');
+  if (STATE.active) {
+    setTimeout(() => startListening(), 500);
+  } else {
+    updateUI('idle');
+  }
+}
+
 function updateUI(state) {
   switch(state) {
     case 'idle':
@@ -352,12 +366,9 @@ function updateUI(state) {
   }
 }
 
-// 按钮：开始/结束对话
 holdBtn.addEventListener('click', () => {
   if (!STATE.apiKey) { alert('请先填入 DeepSeek API Key'); return; }
-
   if (STATE.active) {
-    // 结束对话
     STATE.active = false;
     try { STATE.recognition.abort(); STATE.recognition.stop(); } catch(e) {}
     speechSynthesis.cancel();
@@ -365,34 +376,16 @@ holdBtn.addEventListener('click', () => {
     STATE.speaking = false;
     updateUI('idle');
   } else {
-    // 开始对话 - 解锁 iOS 语音
     if (typeof speechSynthesis !== 'undefined') {
-      // iOS 必须用真实点击触发第一次 speak
       const unlock = new SpeechSynthesisUtterance(' ');
       unlock.volume = 0;
       speechSynthesis.speak(unlock);
-      loadVoices();
     }
-    // 开始对话
     STATE.active = true;
     updateUI('active');
     setTimeout(() => startListening(), 500);
   }
 });
-
-// 预加载语音 - 在第一次点击时加载
-let voicesLoaded = false;
-function loadVoices() {
-  if (voicesLoaded) return;
-  voicesLoaded = true;
-  const v = speechSynthesis.getVoices();
-  if (v.length === 0) {
-    // iOS 需要先 speak 一个空内容来触发加载
-    const dummy = new SpeechSynthesisUtterance('');
-    dummy.volume = 0;
-    speechSynthesis.speak(dummy);
-  }
-}
 </script>
 </body>
 </html>
