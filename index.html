@@ -272,9 +272,16 @@ function speak(text, msgDiv) {
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'zh-CN';
   utter.rate = 1.1;
+  utter.volume = 1;
+
+  // 加载并选择中文语音
+  loadVoices();
   const voices = speechSynthesis.getVoices();
   const zh = voices.filter(v => v.lang.startsWith('zh'));
-  if (zh.length) utter.voice = zh.find(v => v.name.includes('Tingting') || v.name.includes('Xiaoyi')) || zh[0];
+  if (zh.length > 0) {
+    utter.voice = zh.find(v => v.name.includes('Tingting') || v.name.includes('Xiaoyi')) || zh[0];
+  }
+  // 即使没找到中文语音，也用默认语音播报
 
   utter.onend = () => {
     STATE.speaking = false;
@@ -350,6 +357,8 @@ holdBtn.addEventListener('click', () => {
     STATE.speaking = false;
     updateUI('idle');
   } else {
+    // 开始对话 - 先触发语音加载
+    if (typeof speechSynthesis !== 'undefined') loadVoices();
     // 开始对话
     STATE.active = true;
     updateUI('active');
@@ -357,10 +366,18 @@ holdBtn.addEventListener('click', () => {
   }
 });
 
-// 预加载语音
-if (typeof speechSynthesis !== 'undefined') {
-  speechSynthesis.getVoices();
-  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+// 预加载语音 - 在第一次点击时加载
+let voicesLoaded = false;
+function loadVoices() {
+  if (voicesLoaded) return;
+  voicesLoaded = true;
+  const v = speechSynthesis.getVoices();
+  if (v.length === 0) {
+    // iOS 需要先 speak 一个空内容来触发加载
+    const dummy = new SpeechSynthesisUtterance('');
+    dummy.volume = 0;
+    speechSynthesis.speak(dummy);
+  }
 }
 </script>
 </body>
