@@ -84,6 +84,7 @@ body{
   <span class="status-dot" id="statusDot"></span>
   <span style="font-size:12px;color:#999;margin-right:auto" id="statusText">未连接</span>
   <button id="clearBtn">清空对话</button>
+  <button id="testVoice">测试声音</button>
 </div>
 
 <div class="api-section" id="apiSection">
@@ -139,6 +140,19 @@ document.getElementById('saveKey').addEventListener('click', () => {
 document.getElementById('clearBtn').addEventListener('click', () => {
   conv.innerHTML = '';
   addMsg('assistant', '对话已清空，老大请说～');
+});
+
+document.getElementById('testVoice').addEventListener('click', () => {
+  const testText = '老大你好，我是小鹏，声音测试成功。';
+  addMsg('assistant', testText);
+  // 用 setTimeout 确保 iOS 能播放
+  setTimeout(() => {
+    const u = new SpeechSynthesisUtterance(testText);
+    u.lang = 'zh-CN';
+    u.rate = 1.0;
+    u.volume = 1;
+    speechSynthesis.speak(u);
+  }, 100);
 });
 
 // 语音识别
@@ -268,40 +282,34 @@ function speak(text, msgDiv) {
   updateUI('speaking');
   if (msgDiv) msgDiv.classList.add('speaking');
 
-  speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'zh-CN';
-  utter.rate = 1.1;
-  utter.volume = 1;
+  // 用 setTimeout 脱离异步上下文，兼容 iOS
+  setTimeout(() => {
+    speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'zh-CN';
+    utter.rate = 1.1;
+    utter.volume = 1;
 
-  // 加载并选择中文语音
-  loadVoices();
-  const voices = speechSynthesis.getVoices();
-  const zh = voices.filter(v => v.lang.startsWith('zh'));
-  if (zh.length > 0) {
-    utter.voice = zh.find(v => v.name.includes('Tingting') || v.name.includes('Xiaoyi')) || zh[0];
-  }
-  // 即使没找到中文语音，也用默认语音播报
+    utter.onend = () => {
+      STATE.speaking = false;
+      if (msgDiv) msgDiv.classList.remove('speaking');
+      if (STATE.active) {
+        setTimeout(() => startListening(), 500);
+      } else {
+        updateUI('idle');
+      }
+    };
 
-  utter.onend = () => {
-    STATE.speaking = false;
-    if (msgDiv) msgDiv.classList.remove('speaking');
-    if (STATE.active) {
-      setTimeout(() => startListening(), 500);
-    } else {
-      updateUI('idle');
-    }
-  };
+    utter.onerror = () => {
+      STATE.speaking = false;
+      if (msgDiv) msgDiv.classList.remove('speaking');
+      if (STATE.active) {
+        setTimeout(() => startListening(), 500);
+      }
+    };
 
-  utter.onerror = () => {
-    STATE.speaking = false;
-    if (msgDiv) msgDiv.classList.remove('speaking');
-    if (STATE.active) {
-      setTimeout(() => startListening(), 500);
-    }
-  };
-
-  speechSynthesis.speak(utter);
+    speechSynthesis.speak(utter);
+  }, 50);
 }
 
 // UI 状态更新
@@ -357,8 +365,14 @@ holdBtn.addEventListener('click', () => {
     STATE.speaking = false;
     updateUI('idle');
   } else {
-    // 开始对话 - 先触发语音加载
-    if (typeof speechSynthesis !== 'undefined') loadVoices();
+    // 开始对话 - 解锁 iOS 语音
+    if (typeof speechSynthesis !== 'undefined') {
+      // iOS 必须用真实点击触发第一次 speak
+      const unlock = new SpeechSynthesisUtterance(' ');
+      unlock.volume = 0;
+      speechSynthesis.speak(unlock);
+      loadVoices();
+    }
     // 开始对话
     STATE.active = true;
     updateUI('active');
